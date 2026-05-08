@@ -2,7 +2,6 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
-    "postinstall": "npm run build",
     "start": "node server.js",
     "preview": "vite preview --host 127.0.0.1",
     "smoke": "node scripts/smoke.mjs"
