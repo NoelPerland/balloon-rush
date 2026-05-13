@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import './style.css';
 
-type TowerKind = 'dart' | 'cannon' | 'super';
+type TowerKind = 'dart' | 'cannon' | 'super' | 'ultra';
 type EnemyKind = 'red' | 'blue' | 'purple';
 type UpgradePath = 'rapid' | 'power' | 'range';
 
@@ -56,6 +56,7 @@ type Tower = {
   y: number;
   upgradePath?: UpgradePath;
   upgradeTier: number;
+  spent: number;
   cooldown: number;
 };
 
@@ -119,6 +120,7 @@ const TOWER_DEFS: Record<TowerKind, TowerDef> = {
   dart: { kind: 'dart', name: 'Dart', cost: 45, upgradeCost: 55, range: 155, fireRate: 0.34, damage: 1, radius: 25, color: 0x3ca370, accent: 0xffe066 },
   cannon: { kind: 'cannon', name: 'Cannon', cost: 80, upgradeCost: 80, range: 145, fireRate: 0.72, damage: 2, radius: 28, color: 0x566c86, accent: 0xf77622, splash: 58 },
   super: { kind: 'super', name: 'Super', cost: 150, upgradeCost: 120, range: 210, fireRate: 0.14, damage: 1, radius: 34, color: 0x8f563b, accent: 0x29adff },
+  ultra: { kind: 'ultra', name: 'ULTRA', cost: 3000, upgradeCost: 750, range: 360, fireRate: 0.08, damage: 55, radius: 50, color: 0xe43b44, accent: 0xffa300, splash: 130 },
 };
 
 const UPGRADE_TREES: Record<TowerKind, Record<UpgradePath, UpgradePathDef>> = {
@@ -209,6 +211,35 @@ const UPGRADE_TREES: Record<TowerKind, Record<UpgradePath, UpgradePathDef>> = {
       ],
     },
   },
+  ultra: {
+    rapid: {
+      name: 'Inferno Breath',
+      icon: 'tree-super-rapid',
+      tiers: [
+        { title: 'Inferno I', body: 'Dragon fire burns faster.', cost: 900, fireRateMult: 0.75 },
+        { title: 'Inferno II', body: 'Near-constant flame stream.', cost: 1600, fireRateMult: 0.55 },
+        { title: 'Inferno III', body: 'Absurd firestorm.', cost: 2600, fireRateMult: 0.35, damageAdd: 20 },
+      ],
+    },
+    power: {
+      name: 'Ancient Flame',
+      icon: 'tree-super-beam',
+      tiers: [
+        { title: 'Ancient Flame I', body: 'Fire hits much harder.', cost: 1100, damageAdd: 30 },
+        { title: 'Ancient Flame II', body: 'Melts entire groups.', cost: 1900, damageAdd: 70 },
+        { title: 'Ancient Flame III', body: 'Comically overpowered.', cost: 3200, damageAdd: 140 },
+      ],
+    },
+    range: {
+      name: 'Dragon Dominion',
+      icon: 'tree-super-aura',
+      tiers: [
+        { title: 'Dominion I', body: 'Dragon controls more map.', cost: 850, rangeAdd: 80 },
+        { title: 'Dominion II', body: 'Huge fire splash.', cost: 1700, splashAdd: 90 },
+        { title: 'Dominion III', body: 'Almost no safe path remains.', cost: 2900, rangeAdd: 160, splashAdd: 150 },
+      ],
+    },
+  },
 };
 
 const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
@@ -245,8 +276,10 @@ const state = {
   lives: 20,
   wave: 0,
   running: false,
+  autoWave: false,
   selected: 'dart' as TowerKind,
   selectedTowerId: 0,
+  placing: true,
   muted: false,
   logs: [] as string[],
   logOpen: false,
@@ -261,51 +294,24 @@ document.querySelector<HTMLDivElement>('#app')!.appendChild(log);
 
 class AudioBus {
   private ctx?: AudioContext;
-  private musicGain?: GainNode;
-  private pulseGain?: GainNode;
-  private musicNodes: OscillatorNode[] = [];
-  private musicStarted = false;
-  private waveActive = false;
+  private music?: HTMLAudioElement;
 
   setMuted(value: boolean) {
     state.muted = value;
-    this.updateMusic();
+    if (this.music) this.music.muted = value;
   }
 
   startMusic() {
-    if (this.musicStarted || state.muted) return;
-    const ctx = this.getContext();
-    const master = ctx.createGain();
-    const pulse = ctx.createGain();
-    const bass = ctx.createOscillator();
-    const pad = ctx.createOscillator();
-    const lead = ctx.createOscillator();
-    bass.type = 'triangle';
-    pad.type = 'sine';
-    lead.type = 'square';
-    bass.frequency.value = 82.41;
-    pad.frequency.value = 164.82;
-    lead.frequency.value = 329.63;
-    master.gain.value = 0.022;
-    pulse.gain.value = 0.004;
-    bass.connect(master);
-    pad.connect(master);
-    lead.connect(pulse);
-    pulse.connect(master);
-    master.connect(ctx.destination);
-    bass.start();
-    pad.start();
-    lead.start();
-    this.musicGain = master;
-    this.pulseGain = pulse;
-    this.musicNodes = [bass, pad, lead];
-    this.musicStarted = true;
-    this.updateMusic();
+    this.music ??= Object.assign(new Audio('/assets/music/night-of-dizzy-spells.mp3'), {
+      loop: true,
+      volume: 0.35,
+    });
+    this.music.muted = state.muted;
+    void this.music.play();
   }
 
   setWaveActive(value: boolean) {
-    this.waveActive = value;
-    this.updateMusic();
+    void value;
   }
 
   blip(type: 'shoot' | 'pop' | 'wave' | 'upgrade' | 'leak') {
@@ -340,12 +346,6 @@ class AudioBus {
     return this.ctx;
   }
 
-  private updateMusic() {
-    if (!this.musicGain || !this.pulseGain) return;
-    const now = this.ctx?.currentTime ?? 0;
-    this.musicGain.gain.setTargetAtTime(state.muted ? 0 : this.waveActive ? 0.04 : 0.022, now, 0.08);
-    this.pulseGain.gain.setTargetAtTime(state.muted ? 0 : this.waveActive ? 0.014 : 0.004, now, 0.08);
-  }
 }
 
 const audio = new AudioBus();
@@ -375,13 +375,17 @@ class GameScene extends Phaser.Scene {
     this.load.image('tower-dart', '/assets/sprites/tower-dart.png');
     this.load.image('tower-cannon', '/assets/sprites/tower-cannon.png');
     this.load.image('tower-super', '/assets/sprites/tower-super.png');
+    this.load.image('tower-ultra', '/assets/sprites/tower-ultra.png');
     this.load.image('enemy-red', '/assets/sprites/enemy-red.png');
     this.load.image('enemy-blue', '/assets/sprites/enemy-blue.png');
     this.load.image('enemy-purple', '/assets/sprites/enemy-purple.png');
     this.load.image('fx-pop', '/assets/sprites/fx-pop.png');
+    const loadedUpgradeIcons = new Set<string>();
     for (const kind of Object.keys(UPGRADE_TREES) as TowerKind[]) {
       for (const path of Object.keys(UPGRADE_TREES[kind]) as UpgradePath[]) {
         const icon = UPGRADE_TREES[kind][path].icon;
+        if (loadedUpgradeIcons.has(icon)) continue;
+        loadedUpgradeIcons.add(icon);
         this.load.image(icon, `/assets/upgrades/tree/${icon.replace('tree-', '')}.png`);
       }
     }
@@ -399,9 +403,8 @@ class GameScene extends Phaser.Scene {
 
     this.game.canvas.addEventListener('click', (event) => {
       if (state.status !== 'play') return;
-      const rect = this.game.canvas.getBoundingClientRect();
-      const x = ((event.clientX - rect.left) / rect.width) * WORLD_W;
-      const y = ((event.clientY - rect.top) / rect.height) * WORLD_H;
+      const x = (event.offsetX / this.game.canvas.clientWidth) * WORLD_W;
+      const y = (event.offsetY / this.game.canvas.clientHeight) * WORLD_H;
       this.handleBoardClick(x, y);
     });
   }
@@ -425,6 +428,8 @@ class GameScene extends Phaser.Scene {
         state.status = 'win';
         audio.setWaveActive(false);
         renderScreen('win');
+      } else if (state.autoWave) {
+        this.time.delayedCall(900, () => this.startWave());
       }
       renderHud(this);
     }
@@ -436,8 +441,10 @@ class GameScene extends Phaser.Scene {
     state.lives = 20;
     state.wave = 0;
     state.running = false;
+    state.autoWave = false;
     state.selected = 'dart';
     state.selectedTowerId = 0;
+    state.placing = true;
     state.logs = [];
     state.status = 'play';
     audio.startMusic();
@@ -463,7 +470,17 @@ class GameScene extends Phaser.Scene {
   selectTower(kind: TowerKind) {
     state.selected = kind;
     state.selectedTowerId = 0;
+    state.placing = true;
     this.updateSelectedRange();
+    renderHud(this);
+  }
+
+  cancelSelection() {
+    state.selectedTowerId = 0;
+    state.placing = false;
+    this.updateSelectedRange();
+    this.rangePreview?.setVisible(false);
+    this.placementGhost?.setVisible(false);
     renderHud(this);
   }
 
@@ -477,6 +494,7 @@ class GameScene extends Phaser.Scene {
     state.money -= nextTier.cost;
     tower.upgradePath = path;
     tower.upgradeTier += 1;
+    tower.spent += nextTier.cost;
     addLog(`${TOWER_DEFS[tower.kind].name}: ${nextTier.title}`);
     this.flash(tower.x, tower.y, 0xfff1a8, 58);
     this.updateSelectedRange();
@@ -489,8 +507,30 @@ class GameScene extends Phaser.Scene {
     renderHud(this);
   }
 
+  toggleAutoWave() {
+    state.autoWave = !state.autoWave;
+    if (state.autoWave && state.status === 'play' && !state.running) this.startWave();
+    renderHud(this);
+  }
+
   getSelectedTower() {
     return this.towers.find((item) => item.id === state.selectedTowerId);
+  }
+
+  sellSelectedTower() {
+    const tower = this.getSelectedTower();
+    if (!tower) return;
+    const refund = sellValue(tower);
+    state.money += refund;
+    addLog(`Sold ${TOWER_DEFS[tower.kind].name} +$${refund}`);
+    this.towerViews.get(tower.id)?.destroy();
+    this.towerViews.delete(tower.id);
+    this.towers = this.towers.filter((item) => item.id !== tower.id);
+    state.selectedTowerId = 0;
+    state.placing = false;
+    this.updateSelectedRange();
+    audio.blip('upgrade');
+    renderHud(this);
   }
 
   private handleBoardClick(x: number, y: number) {
@@ -498,13 +538,15 @@ class GameScene extends Phaser.Scene {
     if (tower) {
       state.selectedTowerId = tower.id;
       state.selected = tower.kind;
+      state.placing = false;
       this.updateSelectedRange();
       renderHud(this);
       return;
     }
     state.selectedTowerId = 0;
     this.updateSelectedRange();
-    this.placeTower(x, y);
+    if (state.placing) this.placeTower(x, y);
+    else renderHud(this);
   }
 
   private placeTower(x: number, y: number) {
@@ -513,10 +555,16 @@ class GameScene extends Phaser.Scene {
     const def = TOWER_DEFS[state.selected];
     if (state.money < def.cost) return;
     state.money -= def.cost;
-    const tower: Tower = { id: this.id++, kind: state.selected, x, y, upgradeTier: 0, cooldown: 0 };
+    const tower: Tower = { id: this.id++, kind: state.selected, x, y, upgradeTier: 0, spent: def.cost, cooldown: 0 };
     this.towers.push(tower);
     this.towerViews.set(tower.id, this.makeTowerView(tower));
-    state.selectedTowerId = tower.id;
+    if (state.autoWave && state.money >= def.cost) {
+      state.selectedTowerId = 0;
+      state.placing = true;
+    } else {
+      state.selectedTowerId = tower.id;
+      state.placing = false;
+    }
     this.updateSelectedRange();
     audio.blip('upgrade');
     renderHud(this);
@@ -649,7 +697,9 @@ class GameScene extends Phaser.Scene {
     for (const projectile of this.projectiles) {
       let view = this.projectileViews.get(projectile.id);
       if (!view) {
-        view = this.add.circle(projectile.x, projectile.y, projectile.kind === 'cannon' ? 6 : 4, projectile.kind === 'cannon' ? 0x2f1b14 : 0xffe066);
+        const size = projectile.kind === 'ultra' ? 10 : projectile.kind === 'cannon' ? 6 : 4;
+        const color = projectile.kind === 'ultra' ? 0xff7a00 : projectile.kind === 'cannon' ? 0x2f1b14 : 0xffe066;
+        view = this.add.circle(projectile.x, projectile.y, size, color);
         view.setDepth(8);
         this.projectileViews.set(projectile.id, view);
       }
@@ -671,6 +721,10 @@ class GameScene extends Phaser.Scene {
   }
 
   private sizeTowerImage(sprite: Phaser.GameObjects.Image, kind: TowerKind) {
+    if (kind === 'ultra') {
+      sprite.setDisplaySize(142, 142);
+      return;
+    }
     sprite.setDisplaySize(kind === 'super' ? 92 : 78, kind === 'super' ? 106 : 92);
   }
 
@@ -697,7 +751,7 @@ class GameScene extends Phaser.Scene {
 
   private updateRangePreview(x: number, y: number) {
     if (!this.rangePreview || !this.placementGhost || state.status !== 'play') return;
-    if (state.selectedTowerId) {
+    if (state.selectedTowerId || !state.placing) {
       this.rangePreview.setVisible(false);
       this.placementGhost.setVisible(false);
       return;
@@ -725,7 +779,7 @@ class GameScene extends Phaser.Scene {
     const stats: TowerStats = {
       ...def,
       splash: def.splash ?? 0,
-      projectileSpeed: tower.kind === 'cannon' ? 560 : 780,
+      projectileSpeed: tower.kind === 'ultra' ? 1150 : tower.kind === 'cannon' ? 560 : 780,
     };
     if (!tower.upgradePath || tower.upgradeTier <= 0) return stats;
     for (const tier of UPGRADE_TREES[tower.kind][tower.upgradePath].tiers.slice(0, tower.upgradeTier)) {
@@ -858,6 +912,16 @@ function scene() {
   return game.scene.getScene('game') as GameScene;
 }
 
+function volumeIcon(muted: boolean) {
+  return muted
+    ? `<svg class="volume-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9H3Z"/><path d="m17 9 4 4m0-4-4 4"/></svg>`
+    : `<svg class="volume-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9H3Z"/><path d="M16 8c1.2 1.1 2 2.5 2 4s-.8 2.9-2 4"/><path d="M19 5c2.1 1.9 3 4.3 3 7s-.9 5.1-3 7"/></svg>`;
+}
+
+function sellValue(tower: Tower) {
+  return Math.floor(tower.spent * 0.7);
+}
+
 function renderHudOld(gameScene: GameScene) {
   void gameScene;
   return;
@@ -916,7 +980,7 @@ function renderHud(gameScene: GameScene) {
   const buttons = (Object.keys(TOWER_DEFS) as TowerKind[]).map((kind) => {
     const def = TOWER_DEFS[kind];
     const locked = state.money < def.cost;
-    return `<button class="tower ${state.selectedTowerId === 0 && state.selected === kind ? 'active' : ''}" data-tower="${kind}" ${locked ? 'disabled' : ''}>
+    return `<button class="tower ${state.placing && state.selectedTowerId === 0 && state.selected === kind ? 'active' : ''}" data-tower="${kind}" ${locked ? 'disabled' : ''}>
       <span>${def.name}</span><b>$${def.cost}</b>
     </button>`;
   }).join('');
@@ -932,22 +996,33 @@ function renderHud(gameScene: GameScene) {
         <div class="upgrade-title">
           <strong>${selectedDef.name} upgrades</strong>
           <small>${selectedTower.upgradePath ? `Path locked: ${UPGRADE_TREES[selectedTower.kind][selectedTower.upgradePath].name} tier ${selectedTower.upgradeTier}` : 'Choose one path. First upgrade locks this tower.'}</small>
+          <small>Spent $${selectedTower.spent}. Sell refund $${sellValue(selectedTower)} (70%).</small>
         </div>
         <div class="upgrade-cards">${upgradeCards}</div>
+        <button class="sell-button" data-action="sell">Sell +$${sellValue(selectedTower)}</button>
       </div>` : ''}
+      <button class="action auto-wave ${state.autoWave ? 'active' : ''}" data-action="auto-wave">${state.autoWave ? 'Auto On' : 'Auto Wave'}</button>
       <button class="action primary" data-action="wave">${state.running ? 'Wave Live' : 'Start Wave'}</button>
       <button class="icon-button" data-action="mute" title="${state.muted ? 'Unmute' : 'Mute'}" aria-label="${state.muted ? 'Unmute' : 'Mute'}">
-        <span class="speaker-icon ${state.muted ? 'off' : ''}"></span>
+        ${volumeIcon(state.muted)}
       </button>
     </div>
   `;
+  hud.querySelector<HTMLDivElement>('.bar')!.onclick = (event) => {
+    if ((event.target as HTMLElement).closest('button')) return;
+    gameScene.cancelSelection();
+  };
   hud.querySelectorAll<HTMLButtonElement>('[data-tower]').forEach((button) => {
     if (button.disabled) return;
     button.onclick = () => gameScene.selectTower(button.dataset.tower as TowerKind);
   });
   const waveButton = hud.querySelector<HTMLButtonElement>('[data-action="wave"]');
+  const autoWaveButton = hud.querySelector<HTMLButtonElement>('[data-action="auto-wave"]');
+  const sellButton = hud.querySelector<HTMLButtonElement>('[data-action="sell"]');
   const muteButton = hud.querySelector<HTMLButtonElement>('[data-action="mute"]');
   if (waveButton) waveButton.onclick = () => gameScene.startWave();
+  if (autoWaveButton) autoWaveButton.onclick = () => gameScene.toggleAutoWave();
+  if (sellButton) sellButton.onclick = () => gameScene.sellSelectedTower();
   hud.querySelectorAll<HTMLButtonElement>('[data-upgrade-path]').forEach((button) => {
     if (button.disabled) return;
     button.onclick = () => gameScene.upgradeSelected(button.dataset.upgradePath as UpgradePath);
@@ -989,7 +1064,7 @@ function renderScreen(mode: typeof state.status) {
     return;
   }
   const copy = {
-    menu: ['Balloon Path Defense', 'Place towers off path. Click a tower to inspect and upgrade it.'],
+    menu: ['Balloon Rush', 'Place towers, pop every wave of balloons, upgrade fast before the rush gets out of control!'],
     win: ['Victory', 'All waves cleared. Economy strong. Path safe.'],
     loss: ['Defeat', 'Too many balloons escaped. Try earlier cannons and one super tower.'],
   }[mode];
