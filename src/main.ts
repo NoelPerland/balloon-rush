@@ -302,7 +302,7 @@ class AudioBus {
   }
 
   startMusic() {
-    this.music ??= Object.assign(new Audio('/assets/music/night-of-dizzy-spells.mp3'), {
+    this.music ??= Object.assign(new Audio(`${import.meta.env.BASE_URL}assets/music/night-of-dizzy-spells.mp3`), {
       loop: true,
       volume: 0.35,
     });
@@ -371,22 +371,22 @@ class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image('map-bg', '/assets/map-landscape.png');
-    this.load.image('tower-dart', '/assets/sprites/tower-dart.png');
-    this.load.image('tower-cannon', '/assets/sprites/tower-cannon.png');
-    this.load.image('tower-super', '/assets/sprites/tower-super.png');
-    this.load.image('tower-ultra', '/assets/sprites/tower-ultra.png');
-    this.load.image('enemy-red', '/assets/sprites/enemy-red.png');
-    this.load.image('enemy-blue', '/assets/sprites/enemy-blue.png');
-    this.load.image('enemy-purple', '/assets/sprites/enemy-purple.png');
-    this.load.image('fx-pop', '/assets/sprites/fx-pop.png');
+    this.load.image('map-bg', `${import.meta.env.BASE_URL}assets/map-landscape.png`);
+    this.load.image('tower-dart', `${import.meta.env.BASE_URL}assets/sprites/tower-dart.png`);
+    this.load.image('tower-cannon', `${import.meta.env.BASE_URL}assets/sprites/tower-cannon.png`);
+    this.load.image('tower-super', `${import.meta.env.BASE_URL}assets/sprites/tower-super.png`);
+    this.load.image('tower-ultra', `${import.meta.env.BASE_URL}assets/sprites/tower-ultra.png`);
+    this.load.image('enemy-red', `${import.meta.env.BASE_URL}assets/sprites/enemy-red.png`);
+    this.load.image('enemy-blue', `${import.meta.env.BASE_URL}assets/sprites/enemy-blue.png`);
+    this.load.image('enemy-purple', `${import.meta.env.BASE_URL}assets/sprites/enemy-purple.png`);
+    this.load.image('fx-pop', `${import.meta.env.BASE_URL}assets/sprites/fx-pop.png`);
     const loadedUpgradeIcons = new Set<string>();
     for (const kind of Object.keys(UPGRADE_TREES) as TowerKind[]) {
       for (const path of Object.keys(UPGRADE_TREES[kind]) as UpgradePath[]) {
         const icon = UPGRADE_TREES[kind][path].icon;
         if (loadedUpgradeIcons.has(icon)) continue;
         loadedUpgradeIcons.add(icon);
-        this.load.image(icon, `/assets/upgrades/tree/${icon.replace('tree-', '')}.png`);
+        this.load.image(icon, `${import.meta.env.BASE_URL}assets/upgrades/tree/${icon.replace('tree-', '')}.png`);
       }
     }
   }
@@ -401,10 +401,11 @@ class GameScene extends Phaser.Scene {
     renderScreen('menu');
     renderHud(this);
 
-    this.game.canvas.addEventListener('click', (event) => {
+    this.game.canvas.addEventListener('pointerup', (event) => {
       if (state.status !== 'play') return;
-      const x = (event.offsetX / this.game.canvas.clientWidth) * WORLD_W;
-      const y = (event.offsetY / this.game.canvas.clientHeight) * WORLD_H;
+      const bounds = this.game.canvas.getBoundingClientRect();
+      const x = ((event.clientX - bounds.left) / bounds.width) * WORLD_W;
+      const y = ((event.clientY - bounds.top) / bounds.height) * WORLD_H;
       this.handleBoardClick(x, y);
     });
   }
@@ -971,7 +972,7 @@ function renderHud(gameScene: GameScene) {
     const label = locked ? 'Locked' : maxed ? 'Maxed' : `Tier ${selectedTower.upgradeTier + 1} $${tier.cost}`;
     const body = locked ? 'This tower is committed to another path.' : maxed ? 'Path fully upgraded.' : tier.body;
     return `<button class="upgrade-card ${locked ? 'locked' : ''}" data-upgrade-path="${path}" ${disabled ? 'disabled' : ''}>
-      <img src="/assets/upgrades/tree/${tree.icon.replace('tree-', '')}.png" alt="" />
+      <img src="${import.meta.env.BASE_URL}assets/upgrades/tree/${tree.icon.replace('tree-', '')}.png" alt="" />
       <b>${tree.name}</b>
       <small>${label}</small>
       <span>${body}</span>
