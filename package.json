@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "test": "node scripts/check-auto-wave.mjs",
     "verify:mobile": "node scripts/verify-mobile.mjs",
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",

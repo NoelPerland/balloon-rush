@@ -361,6 +361,7 @@ class GameScene extends Phaser.Scene {
   private spawnQueue: EnemyKind[] = [];
   private spawnTimer = 0;
   private waveActive = false;
+  private nextWave?: Phaser.Time.TimerEvent;
   private rangePreview?: Phaser.GameObjects.Arc;
   private selectedRange?: Phaser.GameObjects.Arc;
   private placementGhost?: Phaser.GameObjects.Image;
@@ -430,7 +431,10 @@ class GameScene extends Phaser.Scene {
         audio.setWaveActive(false);
         renderScreen('win');
       } else if (state.autoWave) {
-        this.time.delayedCall(900, () => this.startWave());
+        this.nextWave = this.time.delayedCall(900, () => {
+          this.nextWave = undefined;
+          if (state.autoWave) this.startWave();
+        });
       }
       renderHud(this);
     }
@@ -457,6 +461,8 @@ class GameScene extends Phaser.Scene {
 
   startWave() {
     if (state.status !== 'play' || this.waveActive || state.wave >= WAVES.length) return;
+    this.nextWave?.remove();
+    this.nextWave = undefined;
     this.spawnQueue = [...WAVES[state.wave]];
     state.wave += 1;
     state.running = true;
@@ -509,6 +515,8 @@ class GameScene extends Phaser.Scene {
   }
 
   toggleAutoWave() {
+    this.nextWave?.remove();
+    this.nextWave = undefined;
     state.autoWave = !state.autoWave;
     if (state.autoWave && state.status === 'play' && !state.running) this.startWave();
     renderHud(this);
@@ -883,6 +891,8 @@ class GameScene extends Phaser.Scene {
   }
 
   private clearAll() {
+    this.nextWave?.remove();
+    this.nextWave = undefined;
     [...this.towerViews.values(), ...this.enemyViews.values(), ...this.projectileViews.values()].forEach((view) => view.destroy());
     this.towers = [];
     this.enemies = [];
